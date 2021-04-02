@@ -154,7 +154,5 @@ func main() {
 	n := flag.Int("numPeers", 0, "number of peers to generate keys for")
 
 	flag.Parse()
-	fmt.Printf("helo\n")
-
 	generateKeys(*n)
 }
