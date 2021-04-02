@@ -1,12 +1,19 @@
 package main
 
 import (
+	"crypto/dsa"
+	"crypto/md5"
+	cr "crypto/rand"
+	"encoding/gob"
 	"flag"
 	"fmt"
+	"hash"
 	"io"
 	"log"
+	"math/big"
 	"math/rand"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -175,8 +182,6 @@ func (p *Peer) handleConnection(conn net.Conn) {
 //   go run peer.go <i> <n>
 func main() {
 
-	// args := os.Args[1:]
-
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	i := flag.Int("i", -1, "index number of peer")
@@ -184,9 +189,73 @@ func main() {
 
 	flag.Parse()
 	fmt.Printf("i: %d\n", i)
+	fmt.Printf("n: %d\n", n)
 
-	// i, _ := strconv.Atoi(args[0])
-	// n, _ := strconv.Atoi(args[1])
+	// testing getting the public key
+	pubKeyFile, err := os.Open("keys/peer" + strconv.Itoa(*i) + "/public.key")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	decoder := gob.NewDecoder(pubKeyFile)
+
+	var publickey dsa.PublicKey
+	err = decoder.Decode(&publickey)
+
+	pubKeyFile.Close()
+	fmt.Printf("Public key parameter P: %v\n", publickey.Parameters.P)
+	fmt.Printf("Public key parameter Q: %v\n", publickey.Parameters.Q)
+	fmt.Printf("Public key parameter G: %v\n", publickey.Parameters.G)
+	fmt.Printf("Public key Y: %v\n", publickey.Y)
+
+	// testing getting the private key
+	privKeyFile, err := os.Open("keys/peer" + strconv.Itoa(*i) + "/private.key")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	decoderP := gob.NewDecoder(privKeyFile)
+
+	var privatekey dsa.PrivateKey
+	err = decoderP.Decode(&privatekey)
+
+	privKeyFile.Close()
+	fmt.Printf("private key parameter P: %v\n", privatekey.Parameters.P)
+	fmt.Printf("private key parameter Q: %v\n", privatekey.Parameters.Q)
+	fmt.Printf("private key parameter G: %v\n", privatekey.Parameters.G)
+	fmt.Printf("private key X: %v\n", privatekey.X)
+
+	var h hash.Hash
+	h = md5.New()
+	r := big.NewInt(0)
+	s := big.NewInt(0)
+
+	io.WriteString(h, "This is the message to be signed and verified!")
+	signhash := h.Sum(nil)
+
+	r, s, err = dsa.Sign(cr.Reader, &privatekey, signhash)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	signature := r.Bytes()
+	signature = append(signature, s.Bytes()...)
+
+	fmt.Printf("Signature : %x\n", signature)
+
+	// Verify
+	verifystatus := dsa.Verify(&publickey, signhash, r, s)
+	fmt.Println(verifystatus) // should be true
+
+	// we add additional data to change the signhash
+	io.WriteString(h, "This message is NOT to be signed and verified!")
+	signhash = h.Sum(nil)
+
+	verifystatus = dsa.Verify(&publickey, signhash, r, s)
+	fmt.Println(verifystatus) // should be false
+
 	p := NewPeer(*i, *n)
 	fmt.Printf("Consensus Minimum Value: %f\n", p.min)
 }

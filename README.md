@@ -20,7 +20,8 @@ go build generate_keys.go
 cd ..
 go build peer.go
 ```
-4. Using multiple terminal instances, start running the peers
+
+5. Using multiple terminal instances, start running the peers
 ```
 ./peer.go -i=<peer index #> -n<total # of peers>
 ```
