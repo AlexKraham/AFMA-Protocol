@@ -232,7 +232,7 @@ func getConn(offset int) net.Conn {
 		}
 		time.Sleep(1 * time.Second)
 		currTime++
-		if currTime == 60 {
+		if currTime == 4 {
 			// connection failed time out
 			return nil
 		}
@@ -255,9 +255,9 @@ func (p *Peer) dial() {
 		if j == p.i {
 			continue
 		}
-		fmt.Println("Sending to peer: ", j)
 
 		dial = getConn(j) // get the connection to the other peer j.
+		fmt.Println("Sending to peer: ", j)
 		if dial == nil {
 			// connection timed out
 			fmt.Println("Connection timed out, failed to dial peer #", j)
@@ -343,6 +343,12 @@ func (p *Peer) serve() {
 		p.wg.Done()
 	}()
 
+	// p.wg.Add(1)
+	// go func() {
+	// 	p.test()
+	// 	p.wg.Done()
+	// }()
+
 	for {
 		conn, err := p.listener.Accept()
 		if err != nil {
@@ -367,11 +373,24 @@ func (p *Peer) serve() {
 	}
 }
 
+// func (p *Peer) test() {
+
+// 	for {
+// 		time.Sleep(1 * time.Second)
+// 		p.numValsReceived++
+// 		if p.numValsReceived == 100 {
+// 			return
+// 		}
+// 	}
+
+// }
+
 func (p *Peer) time() {
 	fmt.Println("STARTING TIME")
 	currTime := 0
 	for {
 		fmt.Println("PRINTING")
+		// fmt.Println("IS THIS CHANGING", p.numValsReceived)
 		time.Sleep(1 * time.Second)
 
 		// if we are timing out
@@ -380,20 +399,24 @@ func (p *Peer) time() {
 			// check length of relayable messages here?
 			fmt.Println("curr time is equal to 10")
 			fmt.Println("Consensus Value: ", p.min)
-			p.Stop()
-			return
-		}
-
-		// if we have received from all peers
-		numReceived := 0
-		for i := 0; i < p.n; i++ {
-			if p.peersReceived[i] == true {
-				numReceived++
+			// fmt.Println("len of msgs to relay: ", len(p.Relay.Messages))
+			if len(p.Relay.Messages) == 0 {
+				fmt.Println("Relay msg len size: ", len(p.Relay.Messages))
+				p.Stop()
+				return
 			}
-		}
-		// check if we've received all the values necessary, if so, just end function
-		if numReceived == p.n {
-			fmt.Println("num received is equal to n")
+			// p.Stop()
+			// return
+
+			// fmt.Printf("MESSAGES: ")
+			// for i := 0; i < len(p.Relay.Messages); i++ {
+			// 	fmt.Printf(" %f, ", p.Relay.Messages[i].V)
+			// }
+			// fmt.Printf("\n")
+
+			// p.Stop()
+			// return
+
 			p.roundNum = p.roundNum + 1
 			fmt.Println("DIALING FOR ROUND ", p.roundNum)
 			// set peers received back to false
@@ -413,9 +436,47 @@ func (p *Peer) time() {
 				p.time()
 				p.wg.Done()
 			}()
-			// p.Stop()
+
+			fmt.Println("ENDING TIME")
 			return
+			// // p.Stop()
+			// return
+			// p.Stop()
+			// return
 		}
+
+		// if we have received from all peers
+		numReceived := 0
+		for i := 0; i < p.n; i++ {
+			if p.peersReceived[i] == true {
+				numReceived++
+			}
+		}
+		// check if we've received all the values necessary, if so, just end function
+		// if numReceived == p.n {
+		// 	fmt.Println("num received is equal to n")
+		// 	p.roundNum = p.roundNum + 1
+		// 	fmt.Println("DIALING FOR ROUND ", p.roundNum)
+		// 	// set peers received back to false
+		// 	for i := 0; i < len(p.peersReceived); i++ {
+		// 		if i != p.i {
+		// 			p.peersReceived[i] = false
+		// 		}
+		// 	}
+		// 	p.wg.Add(2)
+		// 	// p.dial()
+		// 	// p.wg.Wait()
+		// 	go func() {
+		// 		p.dial()
+		// 		p.wg.Done()
+		// 	}()
+		// 	go func() {
+		// 		p.time()
+		// 		p.wg.Done()
+		// 	}()
+		// 	// p.Stop()
+		// 	return
+		// }
 
 		// currTime++
 		// // check to see if we'll time out aka received from as many peers as possible
