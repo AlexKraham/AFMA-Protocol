@@ -100,12 +100,15 @@ type Peer struct {
 	wg              sync.WaitGroup   // used to wait for all routines to finish
 	v               float64          // value of peer to propose
 	Messages        Messages         // messages with authentication
+	Extracted       Messages         // messages that have been extracted
+	Relay           Messages         // messages to relay
 	i               int              // peer number
 	n               int              // total number of peers
 	min             float64          // minimum value that the peer has received
 	numValsReceived int              // total number of values currently received by the peer
 	PrivateKey      dsa.PrivateKey
 	PublicKey       dsa.PublicKey
+	roundNum        int // current round number
 }
 
 type Messages struct {
@@ -164,12 +167,15 @@ func NewPeer(i int, n int) *Peer {
 		quit:            make(chan interface{}),
 		v:               val,
 		Messages:        messages,
+		Extracted:       messages,
+		Relay:           messages,
 		i:               i,
 		n:               n,
 		numValsReceived: 1,
 		min:             val,
 		PublicKey:       publicKey,
 		PrivateKey:      privateKey,
+		roundNum:        1,
 	}
 
 	// get the port address based on the peer number, i.
@@ -207,12 +213,18 @@ func getPort(offset int) string {
 // At some point, we should timeout in the future iterations of this code.
 func getConn(offset int) net.Conn {
 	port := getPort(offset)
+	currTime := 0
 	for {
 		d, err := net.Dial("tcp", "localhost:"+port)
 		if err == nil {
 			return d
 		}
 		time.Sleep(1 * time.Second)
+		currTime++
+		if currTime == 60 {
+			// connection failed time out
+			return nil
+		}
 	}
 }
 
@@ -224,13 +236,19 @@ func (p *Peer) dial() {
 
 	// iterate through all peers and send this peer's value to all its other peers.
 	for j := 0; j < p.n; j++ {
-		fmt.Println("j: ", j)
+		// fmt.Println("j: ", j)
 
 		// don't need to send value to itself.
 		if j == p.i {
 			continue
 		}
+
 		dial = getConn(j) // get the connection to the other peer j.
+		if dial == nil {
+			// connection timed out
+			fmt.Println("Connection timed out, failed to dial peer #", j)
+			continue
+		}
 		defer dial.Close()
 
 		// msg := "-r "
@@ -239,8 +257,8 @@ func (p *Peer) dial() {
 		// msg = msg + rStr
 
 		encoder := gob.NewEncoder(dial)
-		encoder.Encode(p.Messages)
-		fmt.Println("messages: ", p.Messages)
+		encoder.Encode(p.Relay)
+		fmt.Println("messages to relay: ", p.Relay)
 
 		// var b bytes.Buffer
 		// e := gob.NewEncoder(&b)
@@ -318,14 +336,98 @@ func (p *Peer) serve() {
 	}
 }
 
+func isValidMessage(p *Peer, message MessageWithAuth) bool {
+	if len(message.Signatures) != p.roundNum {
+		return false
+	}
+
+	for i := 0; i < len(message.Signatures); i++ {
+		// Verify
+		// might need to create a variable that contains all the public keys for all the peers
+		publicKey := getPublicKeyFromFile(message.Signatures[i].PeerNum)
+		signhash := getSignHash(message.V)
+		// get signature
+		// signature := signMessage(i, privateKey, signha?sh)
+		signature := message.Signatures[i]
+		verifystatus := dsa.Verify(&publicKey, signhash, signature.R, signature.S)
+		fmt.Printf("should be true here \n")
+		fmt.Println(verifystatus) // should be true
+		if verifystatus == false {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isMessageInExtracted(p *Peer, message MessageWithAuth) bool {
+	for i := 0; i < len(p.Extracted.Messages); i++ {
+		if message.V == p.Extracted.Messages[i].V {
+			return true
+		}
+	}
+
+	return false
+}
+
 // handle the connection from the peer
 func (p *Peer) handleConnection(conn net.Conn) {
+	// receive round k messages from peer
 
+	// get all messages that have been relayed by peer
 	dec := gob.NewDecoder(conn)
 	messages := &Messages{}
 	dec.Decode(messages)
 	fmt.Println("RECEIVED: ", messages)
 	conn.Close()
+
+	// var messagesToRelay []MessageWithAuth
+
+	// new messages to relay
+	var newRelayMessages []MessageWithAuth
+
+	// for all relayed messages, check
+	for i := 0; i < len(messages.Messages); i++ {
+		// check if message is valid
+		if isValidMessage(p, messages.Messages[i]) {
+			// check is message is isn't in extracted
+			if !isMessageInExtracted(p, messages.Messages[i]) {
+				// var updatedExtractedMessages []MessageWithAuth
+				// updatedExtractedMessages = append(p.Extracted.Messages, messages.Messages...)
+
+				// sign the message
+				signature := signMessage(p.i, p.PrivateKey, getSignHash(messages.Messages[i].V))
+				msgWithAppendedSig := MessageWithAuth{
+					V:          messages.Messages[i].V,
+					Signatures: append(messages.Messages[i].Signatures, signature),
+				}
+
+				// union extracted with the msg
+				p.Extracted = Messages{
+					Messages: append(p.Extracted.Messages, msgWithAppendedSig),
+				}
+				// union relay with {s}
+				// p.Relay = Messages{
+				// 	Messages : append(p.Relay.Messages, msgWithAppendedSig),
+				// }
+				newRelayMessages = append(newRelayMessages, msgWithAppendedSig)
+			}
+
+			// update min value
+			if messages.Messages[i].V < p.min {
+				p.min = messages.Messages[i].V
+			}
+
+			p.numValsReceived++ // increment the number of values received
+
+			// check if we are done
+
+			if p.numValsReceived == p.n {
+				p.Stop()
+			}
+		}
+	}
+
 	// defer conn.Close()
 	// buf := make([]byte, 4096)
 	// for {
