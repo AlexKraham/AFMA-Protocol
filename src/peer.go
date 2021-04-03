@@ -385,6 +385,27 @@ func (p *Peer) serve() {
 
 // }
 
+func (p *Peer) resetPeersReceived() {
+	for i := 0; i < len(p.peersReceived); i++ {
+		if i != p.i {
+			p.peersReceived[i] = false
+		}
+	}
+}
+
+func (p *Peer) hasReceivedFromAllPeers() bool {
+	numReceived := 0
+	for i := 0; i < p.n; i++ {
+		if p.peersReceived[i] == true {
+			numReceived++
+		}
+	}
+	if numReceived == p.n {
+		return true
+	}
+	return false
+}
+
 func (p *Peer) time() {
 	fmt.Println("STARTING TIME")
 	currTime := 0
@@ -399,35 +420,18 @@ func (p *Peer) time() {
 			// check length of relayable messages here?
 			fmt.Println("curr time is equal to 10")
 			fmt.Println("Consensus Value: ", p.min)
-			// fmt.Println("len of msgs to relay: ", len(p.Relay.Messages))
+			// if no messages to relay, and we are at timeout - this means there is nothing left to get and we can stop
 			if len(p.Relay.Messages) == 0 {
-				fmt.Println("Relay msg len size: ", len(p.Relay.Messages))
 				p.Stop()
 				return
 			}
-			// p.Stop()
-			// return
-
-			// fmt.Printf("MESSAGES: ")
-			// for i := 0; i < len(p.Relay.Messages); i++ {
-			// 	fmt.Printf(" %f, ", p.Relay.Messages[i].V)
-			// }
-			// fmt.Printf("\n")
-
-			// p.Stop()
-			// return
 
 			p.roundNum = p.roundNum + 1
-			fmt.Println("DIALING FOR ROUND ", p.roundNum)
 			// set peers received back to false
-			for i := 0; i < len(p.peersReceived); i++ {
-				if i != p.i {
-					p.peersReceived[i] = false
-				}
-			}
+			p.resetPeersReceived()
+
 			p.wg.Add(2)
-			// p.dial()
-			// p.wg.Wait()
+
 			go func() {
 				p.dial()
 				p.wg.Done()
@@ -437,55 +441,32 @@ func (p *Peer) time() {
 				p.wg.Done()
 			}()
 
-			fmt.Println("ENDING TIME")
 			return
-			// // p.Stop()
-			// return
-			// p.Stop()
-			// return
 		}
 
 		// if we have received from all peers
-		numReceived := 0
-		for i := 0; i < p.n; i++ {
-			if p.peersReceived[i] == true {
-				numReceived++
-			}
-		}
-		// check if we've received all the values necessary, if so, just end function
-		// if numReceived == p.n {
-		// 	fmt.Println("num received is equal to n")
-		// 	p.roundNum = p.roundNum + 1
-		// 	fmt.Println("DIALING FOR ROUND ", p.roundNum)
-		// 	// set peers received back to false
-		// 	for i := 0; i < len(p.peersReceived); i++ {
-		// 		if i != p.i {
-		// 			p.peersReceived[i] = false
-		// 		}
-		// 	}
-		// 	p.wg.Add(2)
-		// 	// p.dial()
-		// 	// p.wg.Wait()
-		// 	go func() {
-		// 		p.dial()
-		// 		p.wg.Done()
-		// 	}()
-		// 	go func() {
-		// 		p.time()
-		// 		p.wg.Done()
-		// 	}()
-		// 	// p.Stop()
-		// 	return
-		// }
 
-		// currTime++
-		// // check to see if we'll time out aka received from as many peers as possible
-		// if currTime == 10 {
-		// 	p.Stop()
-		// }
+		// check if we've received all the values necessary, if so, just end function
+		if p.hasReceivedFromAllPeers() {
+			p.roundNum = p.roundNum + 1
+
+			p.resetPeersReceived()
+			p.wg.Add(2)
+
+			go func() {
+				p.dial()
+				p.wg.Done()
+			}()
+			go func() {
+				p.time()
+				p.wg.Done()
+			}()
+			// p.Stop()
+			return
+		}
+
 	}
 
-	// p.Stop()?
 }
 
 func isValidMessage(p *Peer, message MessageWithAuth) bool {
@@ -530,10 +511,8 @@ func (p *Peer) handleConnection(conn net.Conn) {
 	dec := gob.NewDecoder(conn)
 	messages := &Messages{}
 	dec.Decode(messages)
-	// fmt.Println("RECEIVED: ", messages)
-	conn.Close()
 
-	// var messagesToRelay []MessageWithAuth
+	conn.Close()
 
 	// new messages to relay
 	var newRelayMessages []MessageWithAuth
@@ -544,10 +523,6 @@ func (p *Peer) handleConnection(conn net.Conn) {
 		if isValidMessage(p, messages.Messages[i]) {
 			// check is message is isn't in extracted
 			if !isMessageInExtracted(p, messages.Messages[i]) {
-				// var updatedExtractedMessages []MessageWithAuth
-				// updatedExtractedMessages = append(p.Extracted.Messages, messages.Messages...)
-				fmt.Println("VALUE TO ADD TO EXTRACTED: ", messages.Messages[i].V)
-
 				// sign the message
 				signature := signMessage(p.i, p.PrivateKey, getSignHash(messages.Messages[i].V))
 				msgWithAppendedSig := MessageWithAuth{
@@ -559,10 +534,8 @@ func (p *Peer) handleConnection(conn net.Conn) {
 				p.Extracted = Messages{
 					Messages: append(p.Extracted.Messages, msgWithAppendedSig),
 				}
+
 				// union relay with {s}
-				// p.Relay = Messages{
-				// 	Messages : append(p.Relay.Messages, msgWithAppendedSig),
-				// }
 				newRelayMessages = append(newRelayMessages, msgWithAppendedSig)
 
 			}
@@ -572,185 +545,23 @@ func (p *Peer) handleConnection(conn net.Conn) {
 				p.min = messages.Messages[i].V
 			}
 
-			// add to the array that its received value from this process
-			// p.peersReceived = append(p.peersReceived, messages.Messages[i].Signatures[0].PeerNum)
+			// update peer received
 			p.peersReceived[messages.Messages[i].Signatures[0].PeerNum] = true
-
-			// p.numValsReceived++ // increment the number of values received
-
-			// // // check if we are done
-
-			// if p.numValsReceived == p.n {
-			// 	p.Stop()
-			// }
 		}
 	}
 
+	// add to relay messages for next round
 	p.Relay.Messages = append(p.Relay.Messages, newRelayMessages...)
-	fmt.Println("msg len: ", len(p.Relay.Messages))
-	// if len(p.Relay.Messages) == 0 {
-	// 	time.Sleep(5 * time.Second)
-	// 	fmt.Println("ITS 0")
-	// 	return
-	// }
-
-	numReceived := 0
-	for i := 0; i < p.n; i++ {
-		if p.peersReceived[i] == true {
-			numReceived++
-		}
-	}
-	fmt.Println("NUM RECEIVED: ", numReceived)
-	if numReceived == p.n || p.timeRun == 10 {
-		// fmt.Println("relay messages: ", len(p.Relay.Messages))
-		// fmt.Printf("MESSAGES: ")
-		// for i := 0; i < len(p.Relay.Messages); i++ {
-		// 	fmt.Printf(" %f, ", p.Relay.Messages[i].V)
-		// }
-		// fmt.Printf("\n")
-		// p.roundNum = p.roundNum + 1
-		// fmt.Println("DIALING FOR ROUND ", p.roundNum)
-		// // set peers received back to false
-		// for i := 0; i < len(p.peersReceived); i++ {
-		// 	if i != p.i {
-		// 		p.peersReceived[i] = false
-		// 	}
-		// }
-		// p.wg.Add(1)
-		// p.dial()
-		// p.wg.Wait()
-		// p.Stop()?
-	}
-
-	// defer conn.Close()
-	// buf := make([]byte, 4096)
-	// for {
-
-	// netData, err := conn.Read(buf) // receive data from peer
-
-	// // check for errors
-	// if err != nil && err != io.EOF {
-	// 	log.Println("read error", err)
-	// 	return
-	// }
-	// if netData == 0 {
-	// 	return
-	// }
-
-	// // var b bytes.Buffer
-
-	// fmt.Printf("RECEIVED: %s\n", string(buf[:netData]))
-
-	// words := strings.Fields(string(buf[:netData]))
-	// fmt.Println(words)
-
-	// test := new(big.Int)
-	// test.SetBytes(buf[:netData])
-	// x, err := fmt.Sscan(string(buf[:netData]), test)
-	// if err != nil {
-	// 	log.Println("error scanning value:", err)
-	// } else {
-	// 	fmt.Println(test)
-	// }
-	// fmt.Println(test)
-
-	// // parse netData to a float value.
-	// val, _ := strconv.ParseFloat(string(buf[:netData]), 64)
-
-	// // check if val received from peer is smaller than the current min value. If it is, update the value.
-	// if val < p.min {
-	// 	p.min = val
-	// }
-	// p.numValsReceived++ // increment the number of values received
-
-	// // if the number of values received is equal to n, then we can call the server to stop listening as we have
-	// // received all the values from the all peers in the protocol
-	// if p.numValsReceived == p.n {
-	// 	p.Stop()
-	// }
-	// }
 }
 
 // Usage:
 //   go run peer.go <i> <n>
 func main() {
-
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	i := flag.Int("i", -1, "index number of peer")
 	n := flag.Int("n", -1, "total number of peers")
-
 	flag.Parse()
-	// fmt.Printf("i: %d\n", i)
-	// fmt.Printf("n: %d\n", n)
-
-	// publickey := getPublicKeyFromFile(*i)
-	// // keyutils.getPublicKeyFromFile(i, publickey)
-	// // testing getting the public key
-	// // pubKeyFile, err := os.Open("keys/peer" + strconv.Itoa(*i) + "/public.key")
-	// // if err != nil {
-	// // 	fmt.Println(err)
-	// // 	os.Exit(1)
-	// // }
-
-	// // decoder := gob.NewDecoder(pubKeyFile)
-
-	// // var publickey dsa.PublicKey
-	// // err = decoder.Decode(&publickey)
-
-	// // pubKeyFile.Close()
-	// fmt.Printf("Public key parameter P: %v\n", publickey.Parameters.P)
-	// fmt.Printf("Public key parameter Q: %v\n", publickey.Parameters.Q)
-	// fmt.Printf("Public key parameter G: %v\n", publickey.Parameters.G)
-	// fmt.Printf("Public key Y: %v\n", publickey.Y)
-
-	// // testing getting the private key
-	// privKeyFile, err := os.Open("keys/peer" + strconv.Itoa(*i) + "/private.key")
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	os.Exit(1)
-	// }
-
-	// // decoderP := gob.NewDecoder(privKeyFile)
-
-	// // var privatekey dsa.PrivateKey
-	// // err = decoderP.Decode(&privatekey)
-	// privatekey := getPrivateKeyFromFile(*i)
-
-	// privKeyFile.Close()
-	// fmt.Printf("private key parameter P: %v\n", privatekey.Parameters.P)
-	// fmt.Printf("private key parameter Q: %v\n", privatekey.Parameters.Q)
-	// fmt.Printf("private key parameter G: %v\n", privatekey.Parameters.G)
-	// fmt.Printf("private key X: %v\n", privatekey.X)
-
-	// var h hash.Hash
-	// h = md5.New()
-	// r := big.NewInt(0)
-	// s := big.NewInt(0)
-
-	// io.WriteString(h, "This is the message to be signed and verified!")
-	// signhash := h.Sum(nil)
-
-	// r, s, err = dsa.Sign(cr.Reader, &privatekey, signhash)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
-
-	// signature := r.Bytes()
-	// signature = append(signature, s.Bytes()...)
-
-	// fmt.Printf("Signature : %x\n", signature)
-
-	// // Verify
-	// verifystatus := dsa.Verify(&publickey, signhash, r, s)
-	// fmt.Println(verifystatus) // should be true
-
-	// // we add additional data to change the signhash
-	// io.WriteString(h, "This message is NOT to be signed and verified!")
-	// signhash = h.Sum(nil)
-
-	// verifystatus = dsa.Verify(&publickey, signhash, r, s)
-	// fmt.Println(verifystatus) // should be false
 
 	p := NewPeer(*i, *n)
 	fmt.Printf("Consensus Minimum Value: %f\n", p.min)
