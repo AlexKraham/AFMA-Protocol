@@ -231,7 +231,7 @@ func getConn(offset int) net.Conn {
 		}
 		time.Sleep(1 * time.Second)
 		currTime++
-		if currTime == 60 {
+		if currTime == 20 {
 			// connection failed time out
 			return nil
 		}
@@ -360,29 +360,30 @@ func (p *Peer) serve() {
 
 func (p *Peer) time() {
 	fmt.Println("STARTING TIME")
-	currTime := 0
-	for {
-		time.Sleep(1 * time.Second)
+	time.Sleep(10 * time.Second)
+	p.Stop()
 
-		numReceived := 0
-		for i := 0; i < p.n; i++ {
-			if p.peersReceived[i] == true {
-				numReceived++
-			}
-		}
-		// check if we've received all the values necessary, if so, just end function
-		if numReceived == p.n {
-			return
-		}
-
-		currTime++
-		// check to see if we'll time out aka received from as many peers as possible
-		if currTime == 10 {
-			p.Stop()
+	p.roundNum = p.roundNum + 1
+	fmt.Println("DIALING FOR ROUND ", p.roundNum)
+	// set peers received back to false
+	for i := 0; i < len(p.peersReceived); i++ {
+		if i != p.i {
+			p.peersReceived[i] = false
 		}
 	}
-
-	// p.Stop()?
+	p.wg.Add(2)
+	go func() {
+		p.dial() // handle the connection from a peer attempting to send a value
+		// start timer such that
+		p.wg.Wait()
+	}()
+	// p.dial()
+	// p.wg.Wait()
+	go func() {
+		p.time()
+		p.wg.Wait()
+	}()
+	// p.Stop()
 }
 
 func isValidMessage(p *Peer, message MessageWithAuth) bool {
@@ -424,6 +425,7 @@ func (p *Peer) handleConnection(conn net.Conn) {
 	// receive round k messages from peer
 
 	// get all messages that have been relayed by peer
+	// THeser are p.Relay
 	dec := gob.NewDecoder(conn)
 	messages := &Messages{}
 	dec.Decode(messages)
@@ -460,7 +462,11 @@ func (p *Peer) handleConnection(conn net.Conn) {
 				// 	Messages : append(p.Relay.Messages, msgWithAppendedSig),
 				// }
 				newRelayMessages = append(newRelayMessages, msgWithAppendedSig)
-
+				fmt.Printf("VAL: ")
+				for i := 0; i < len(newRelayMessages); i++ {
+					fmt.Printf("%f, ", newRelayMessages[i].V)
+				}
+				fmt.Printf("\n")
 			}
 
 			// update min value
@@ -490,14 +496,14 @@ func (p *Peer) handleConnection(conn net.Conn) {
 	}
 	fmt.Println("NUM RECEIVED: ", numReceived)
 	if numReceived == p.n {
-		// p.roundNum = p.roundNum + 1
-		// fmt.Println("DIALING FOR ROUND ", p.roundNum)
-		// // set peers received back to false
-		// for i := 0; i < len(p.peersReceived); i++ {
-		// 	if i != p.i {
-		// 		p.peersReceived[i] = false
-		// 	}
-		// }
+		p.roundNum = p.roundNum + 1
+		fmt.Println("DIALING FOR ROUND ", p.roundNum)
+		// set peers received back to false
+		for i := 0; i < len(p.peersReceived); i++ {
+			if i != p.i {
+				p.peersReceived[i] = false
+			}
+		}
 		// p.wg.Add(1)
 		// p.dial()
 		// p.wg.Wait()
