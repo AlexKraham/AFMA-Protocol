@@ -110,6 +110,7 @@ type Peer struct {
 	PublicKey       dsa.PublicKey
 	peersReceived   []bool // an array holding all the peers its received for this round
 	roundNum        int    // current round number
+	timeRun         int    // current time in seconds
 }
 
 type Messages struct {
@@ -369,6 +370,14 @@ func (p *Peer) time() {
 	for {
 		time.Sleep(1 * time.Second)
 
+		// if we are timing out
+		currTime++
+		if currTime == 10 {
+			p.Stop()
+			return
+		}
+
+		// if we have received from all peers
 		numReceived := 0
 		for i := 0; i < p.n; i++ {
 			if p.peersReceived[i] == true {
@@ -377,14 +386,15 @@ func (p *Peer) time() {
 		}
 		// check if we've received all the values necessary, if so, just end function
 		if numReceived == p.n {
+			p.Stop()
 			return
 		}
 
-		currTime++
-		// check to see if we'll time out aka received from as many peers as possible
-		if currTime == 10 {
-			p.Stop()
-		}
+		// currTime++
+		// // check to see if we'll time out aka received from as many peers as possible
+		// if currTime == 10 {
+		// 	p.Stop()
+		// }
 	}
 
 	// p.Stop()?
@@ -503,7 +513,7 @@ func (p *Peer) handleConnection(conn net.Conn) {
 		}
 	}
 	fmt.Println("NUM RECEIVED: ", numReceived)
-	if numReceived == p.n {
+	if numReceived == p.n || p.timeRun == 10 {
 		// fmt.Println("relay messages: ", len(p.Relay.Messages))
 		// fmt.Printf("MESSAGES: ")
 		// for i := 0; i < len(p.Relay.Messages); i++ {
@@ -521,7 +531,7 @@ func (p *Peer) handleConnection(conn net.Conn) {
 		// p.wg.Add(1)
 		// p.dial()
 		// p.wg.Wait()
-		// p.Stop()
+		// p.Stop()?
 	}
 
 	// defer conn.Close()

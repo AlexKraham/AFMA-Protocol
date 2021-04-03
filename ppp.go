@@ -314,11 +314,6 @@ func (p *Peer) dial() {
 		// 	log.Fatal(err)
 		// }
 	}
-
-	var emptyMessages []MessageWithAuth
-	p.Relay = Messages{
-		Messages: emptyMessages,
-	}
 }
 
 // function to stop the peer server from running
@@ -377,6 +372,7 @@ func (p *Peer) time() {
 		}
 		// check if we've received all the values necessary, if so, just end function
 		if numReceived == p.n {
+			p.Stop()
 			return
 		}
 
@@ -448,7 +444,6 @@ func (p *Peer) handleConnection(conn net.Conn) {
 			if !isMessageInExtracted(p, messages.Messages[i]) {
 				// var updatedExtractedMessages []MessageWithAuth
 				// updatedExtractedMessages = append(p.Extracted.Messages, messages.Messages...)
-				fmt.Println("VALUE TO ADD TO EXTRACTED: ", messages.Messages[i].V)
 
 				// sign the message
 				signature := signMessage(p.i, p.PrivateKey, getSignHash(messages.Messages[i].V))
@@ -488,14 +483,6 @@ func (p *Peer) handleConnection(conn net.Conn) {
 		}
 	}
 
-	p.Relay.Messages = append(p.Relay.Messages, newRelayMessages...)
-	fmt.Println("msg len: ", len(p.Relay.Messages))
-	// if len(p.Relay.Messages) == 0 {
-	// 	time.Sleep(5 * time.Second)
-	// 	fmt.Println("ITS 0")
-	// 	return
-	// }
-
 	numReceived := 0
 	for i := 0; i < p.n; i++ {
 		if p.peersReceived[i] == true {
@@ -504,12 +491,6 @@ func (p *Peer) handleConnection(conn net.Conn) {
 	}
 	fmt.Println("NUM RECEIVED: ", numReceived)
 	if numReceived == p.n {
-		// fmt.Println("relay messages: ", len(p.Relay.Messages))
-		// fmt.Printf("MESSAGES: ")
-		// for i := 0; i < len(p.Relay.Messages); i++ {
-		// 	fmt.Printf(" %f, ", p.Relay.Messages[i].V)
-		// }
-		// fmt.Printf("\n")
 		// p.roundNum = p.roundNum + 1
 		// fmt.Println("DIALING FOR ROUND ", p.roundNum)
 		// // set peers received back to false
