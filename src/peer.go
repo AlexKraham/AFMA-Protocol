@@ -80,8 +80,6 @@ func signMessage(i int, privateKey dsa.PrivateKey, signhash []byte) Signature {
 		fmt.Println(err)
 	}
 
-	// fmt.Printf("R VALUE: - ITSELF %d\n", r)
-
 	signaturebytes := r.Bytes()
 	signaturebytes = append(signaturebytes, s.Bytes()...)
 
@@ -109,8 +107,6 @@ type Peer struct {
 	min             float64          // minimum value that the peer has received
 	numValsReceived int              // total number of values currently received by the peer
 	PrivateKey      dsa.PrivateKey   // private key of the peer itself
-	PublicKey       dsa.PublicKey    // public key of the peer itself
-	PublicKeys      []dsa.PublicKey  // list of all public keys from peers
 	peersReceived   []bool           // an array holding all the peers its received for this round
 	roundNum        int              // current round number
 	timeRun         int              // current time in seconds
@@ -139,7 +135,6 @@ func NewPeer(i int, n int) *Peer {
 	val := rand.Float64() // get a random value from 0 to 1
 
 	// get public and private key for this peer
-	publicKey := getPublicKeyFromFile(i)
 	privateKey := getPrivateKeyFromFile(i)
 
 	// hash value that the peer is trying to send
@@ -147,10 +142,7 @@ func NewPeer(i int, n int) *Peer {
 	// get signature
 	signature := signMessage(i, privateKey, signhash)
 
-	// // Verify
-	// verifystatus := dsa.Verify(&publicKey, signhash, signature.r, signature.s)
-	// fmt.Printf("should be true here \n")
-	// fmt.Println(verifystatus) // should be true
+	// Verify
 	var signatures []Signature
 	signatures = append(signatures, signature)
 	// create initial array with peer's own signed message
@@ -170,10 +162,6 @@ func NewPeer(i int, n int) *Peer {
 	// create bool array to determine which peers we have received from so far
 	peersReceived := make([]bool, n)
 	peersReceived[i] = true
-	// var peersReceived [n]bool
-	// for i := 0; i < n; i++ {
-	// 	peersReceived[i] = false
-	// }
 
 	// create the new peer
 	p := &Peer{
@@ -186,7 +174,6 @@ func NewPeer(i int, n int) *Peer {
 		n:               n,
 		numValsReceived: 1,
 		min:             val,
-		PublicKey:       publicKey,
 		PrivateKey:      privateKey,
 		roundNum:        1,
 		peersReceived:   peersReceived,
@@ -205,6 +192,7 @@ func NewPeer(i int, n int) *Peer {
 
 	p.wg.Add(2)
 
+	// iterate through each round by dialing and sending until there are no messages to relay.
 	for len(p.Relay.Messages) != 0 {
 		fmt.Println("Starting round: ", p.roundNum)
 		// save messages to relay and send that to dial to others
@@ -220,11 +208,9 @@ func NewPeer(i int, n int) *Peer {
 		go p.serve()           // receive from peers
 
 		p.wg.Wait() // wait until dial and serve are finished.
-		fmt.Println("dial and serve are complete")
-		fmt.Println("Relay Message Length: ", len(p.Relay.Messages))
-		// update round numer
+
+		// update round number
 		p.roundNum++
-		// iterate to another round.
 	}
 
 	return p
@@ -261,23 +247,19 @@ func getConn(offset int) net.Conn {
 
 // function to dial to other peers.
 func (p *Peer) dial(msgsToRelay Messages) {
-	fmt.Println("DIALING.....")
 	defer p.wg.Done()
 
 	var dial net.Conn
 
 	// iterate through all peers and send this peer's value to all its other peers.
 	for j := 0; j < p.n; j++ {
-
-		// fmt.Println("j: ", j)
-
 		// don't need to send value to itself.
 		if j == p.i {
 			continue
 		}
 
 		dial = getConn(j) // get the connection to the other peer j.
-		fmt.Println("Sending to peer: ", j)
+
 		if dial == nil {
 			// connection timed out
 			fmt.Println("Connection timed out, failed to dial peer #", j)
@@ -285,64 +267,9 @@ func (p *Peer) dial(msgsToRelay Messages) {
 		}
 		defer dial.Close()
 
-		// msg := "-r "
-		// rStr := []byte(p.messages[0].signatures[0].r.Bytes())
-		// rStr := p.Messages[0].Signatures[0].R.String()
-		// msg = msg + rStr
-
 		encoder := gob.NewEncoder(dial)
 		encoder.Encode(msgsToRelay)
-		// fmt.Println("messages to relay: ", p.Relay)
-
-		// var b bytes.Buffer
-		// e := gob.NewEncoder(&b)
-		// if err := e.Encode(p); err != nil {
-		// 	panic(err)
-		// }
-
-		// if _, err := dial.Write(b.Bytes()); err != nil {
-		// 	log.Fatal(err)
-		// }
-		// fmt.Println("MY OWN PRIVATE KEY: ", p.PrivateKey)
-		// fmt.Println("Encoded Struc?t ", b)
-
-		// var p2 Peer
-		// d := gob.NewDecoder(&b)
-		// if err := d.Decode(&p2); err != nil {
-		// 	panic(err)
-		// }
-
-		// fmt.Println("Decoded Struct PRIVATE:  ", p2.PrivateKey)
-
-		// send value message
-		// if _, err := dial.Write([]byte(msg)); err != nil {
-		// 	log.Fatal(err)
-		// }
-
-		// // send s mssg
-		// msg = "-s "
-		// // rStr := []byte(p.messages[0].signatures[0].r.Bytes())
-		// sStr := p.messages[0].signatures[0].s.String()
-		// msg = msg + sStr
-
-		// if _, err := dial.Write([]byte(msg)); err != nil {
-		// 	log.Fatal(err)
-		// }
-		// // if _, err := dial.Write([]byte(strconv.FormatFloat(p.messages[0].v, 'f', 6, 64))); err != nil {
-		// 	log.Fatal(err)
-		// }
-
-		// send value as a string to peer j
-		// if _, err := dial.Write([]byte(strconv.FormatFloat(p.v, 'f', 6, 64))); err != nil {
-		// 	log.Fatal(err)
-		// }
 	}
-
-	// var emptyMessages []MessageWithAuth
-	// p.Relay = Messages{
-	// 	Messages: emptyMessages,
-	// }
-	fmt.Println("DONE WITH DIAL")
 }
 
 // function to stop the peer server from running
@@ -384,18 +311,6 @@ func (p *Peer) serve() {
 	}
 }
 
-// func (p *Peer) test() {
-
-// 	for {
-// 		time.Sleep(1 * time.Second)
-// 		p.numValsReceived++
-// 		if p.numValsReceived == 100 {
-// 			return
-// 		}
-// 	}
-
-// }
-
 func (p *Peer) resetPeersReceived() {
 	for i := 0; i < len(p.peersReceived); i++ {
 		if i != p.i {
@@ -421,7 +336,6 @@ func (p *Peer) hasReceivedFromAllPeers() bool {
 // at this point
 func (p *Peer) startRoundTime() {
 	for i := 0; i < 5; i++ {
-		fmt.Println("Time: ", i)
 		time.Sleep(1 * time.Second)
 		if p.hasReceivedFromAllPeers() {
 			p.Stop()
@@ -433,70 +347,7 @@ func (p *Peer) startRoundTime() {
 	return
 }
 
-func (p *Peer) time() {
-	fmt.Println("STARTING TIME")
-	currTime := 0
-	for {
-		fmt.Println("PRINTING")
-		// fmt.Println("IS THIS CHANGING", p.numValsReceived)
-		time.Sleep(1 * time.Second)
-
-		// if we are timing out
-		currTime++
-		if currTime == 10 {
-			// check length of relayable messages here?
-			// fmt.Println("curr time is equal to 10")
-			// fmt.Println("Consensus Value: ", p.min)
-			// if no messages to relay, and we are at timeout - this means there is nothing left to get and we can stop
-			if len(p.Relay.Messages) == 0 {
-				p.Stop()
-				return
-			}
-
-			p.roundNum = p.roundNum + 1
-			// set peers received back to false
-			p.resetPeersReceived()
-
-			p.wg.Add(1)
-
-			go func() {
-				p.dial(p.Relay)
-				p.wg.Done()
-			}()
-			go func() {
-				p.time()
-				p.wg.Done()
-			}()
-
-			return
-		}
-
-		// if we have received from all peers
-
-		// check if we've received all the values necessary, if so, just end function
-		if p.hasReceivedFromAllPeers() {
-			p.roundNum = p.roundNum + 1
-
-			p.resetPeersReceived()
-			p.wg.Add(2)
-
-			go func() {
-				p.dial(p.Relay)
-				p.wg.Done()
-			}()
-			go func() {
-				p.time()
-				p.wg.Done()
-			}()
-			// p.Stop()
-			return
-		}
-
-	}
-
-}
-
-func isValidMessage(p *Peer, message MessageWithAuth) bool {
+func (p *Peer) isValidMessage(message MessageWithAuth) bool {
 	if len(message.Signatures) != p.roundNum {
 		return false
 	}
@@ -506,16 +357,11 @@ func isValidMessage(p *Peer, message MessageWithAuth) bool {
 
 	for i := 0; i < len(message.Signatures); i++ {
 		// Verify
-		// might need to create a variable that contains all the public keys for all the peers
-		// publicKey := getPublicKeyFromFile(message.Signatures[i].PeerNum)
 		publicKey := publicKeys[message.Signatures[i].PeerNum]
 		signhash := getSignHash(message.V)
 		// get signature
-		// signature := signMessage(i, privateKey, signha?sh)
 		signature := message.Signatures[i]
 		verifystatus := dsa.Verify(&publicKey, signhash, signature.R, signature.S)
-		// fmt.Printf("should be true here \n")
-		// fmt.Println(verifystatus) // should be true
 
 		// add to distinct Signatures
 		foundSig := false
@@ -529,6 +375,7 @@ func isValidMessage(p *Peer, message MessageWithAuth) bool {
 			distinctSignatures = append(distinctSignatures, message.Signatures[i].PeerNum)
 		}
 
+		// if there is any false signatures, the msg isn't valid.
 		if verifystatus == false {
 			return false
 		}
@@ -540,7 +387,8 @@ func isValidMessage(p *Peer, message MessageWithAuth) bool {
 	return false
 }
 
-func isMessageInExtracted(p *Peer, message MessageWithAuth) bool {
+// check if the message value is already in the extracted array of the peer.
+func (p *Peer) isMessageInExtracted(message MessageWithAuth) bool {
 	for i := 0; i < len(p.Extracted.Messages); i++ {
 		if message.V == p.Extracted.Messages[i].V {
 			return true
@@ -567,9 +415,9 @@ func (p *Peer) handleConnection(conn net.Conn) {
 	// for all relayed messages, check
 	for i := 0; i < len(messages.Messages); i++ {
 		// check if message is valid
-		if isValidMessage(p, messages.Messages[i]) {
+		if p.isValidMessage(messages.Messages[i]) {
 			// check is message is isn't in extracted
-			if !isMessageInExtracted(p, messages.Messages[i]) {
+			if !p.isMessageInExtracted(messages.Messages[i]) {
 				// sign the message
 				signature := signMessage(p.i, p.PrivateKey, getSignHash(messages.Messages[i].V))
 				msgWithAppendedSig := MessageWithAuth{
@@ -599,10 +447,6 @@ func (p *Peer) handleConnection(conn net.Conn) {
 
 	// add to relay messages for next round
 	p.Relay.Messages = append(p.Relay.Messages, newRelayMessages...)
-	// if p.hasReceivedFromAllPeers() {
-	// 	fmt.Println("Received from all peers...")
-	// 	// p.Stop()
-	// }
 }
 
 // Usage:
