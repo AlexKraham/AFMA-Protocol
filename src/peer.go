@@ -18,6 +18,8 @@ import (
 	"time"
 )
 
+var publicKeys []dsa.PublicKey
+
 func getPublicKeyFromFile(peerIndex int) dsa.PublicKey {
 	var publickey dsa.PublicKey
 	pubKeyFile, err := os.Open("keys/peer" + strconv.Itoa(peerIndex) + "/public.key")
@@ -106,11 +108,12 @@ type Peer struct {
 	n               int              // total number of peers
 	min             float64          // minimum value that the peer has received
 	numValsReceived int              // total number of values currently received by the peer
-	PrivateKey      dsa.PrivateKey
-	PublicKey       dsa.PublicKey
-	peersReceived   []bool // an array holding all the peers its received for this round
-	roundNum        int    // current round number
-	timeRun         int    // current time in seconds
+	PrivateKey      dsa.PrivateKey   // private key of the peer itself
+	PublicKey       dsa.PublicKey    // public key of the peer itself
+	PublicKeys      []dsa.PublicKey  // list of all public keys from peers
+	peersReceived   []bool           // an array holding all the peers its received for this round
+	roundNum        int              // current round number
+	timeRun         int              // current time in seconds
 }
 
 type Messages struct {
@@ -504,7 +507,8 @@ func isValidMessage(p *Peer, message MessageWithAuth) bool {
 	for i := 0; i < len(message.Signatures); i++ {
 		// Verify
 		// might need to create a variable that contains all the public keys for all the peers
-		publicKey := getPublicKeyFromFile(message.Signatures[i].PeerNum)
+		// publicKey := getPublicKeyFromFile(message.Signatures[i].PeerNum)
+		publicKey := publicKeys[message.Signatures[i].PeerNum]
 		signhash := getSignHash(message.V)
 		// get signature
 		// signature := signMessage(i, privateKey, signha?sh)
@@ -609,6 +613,11 @@ func main() {
 	i := flag.Int("i", -1, "index number of peer")
 	n := flag.Int("n", -1, "total number of peers")
 	flag.Parse()
+
+	// create a global public section for peers to refer to
+	for j := 0; j < *n; j++ {
+		publicKeys = append(publicKeys, getPublicKeyFromFile(j))
+	}
 
 	p := NewPeer(*i, *n)
 	fmt.Printf("Consensus Minimum Value: %f\n", p.min)
