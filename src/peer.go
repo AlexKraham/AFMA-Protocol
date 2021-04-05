@@ -202,18 +202,27 @@ func NewPeer(i int, n int) *Peer {
 
 	p.wg.Add(2)
 
-	msgsToRelay := p.Relay
-	var emptyMessages []MessageWithAuth
-	p.Relay = Messages{
-		Messages: emptyMessages,
-	}
-	// routine to dial to other peers and to serve(receive/listen) to peers dialing in.
-	go p.dial(msgsToRelay) // send to peers
-	go p.serve()           // receive from peers
+	for len(p.Relay.Messages) != 0 {
+		fmt.Println("Starting round: ", p.roundNum)
+		// save messages to relay and send that to dial to others
+		msgsToRelay := p.Relay
 
-	p.wg.Wait() // wait until dial and serve are finished.
-	fmt.Println("dial and serve are complete")
-	fmt.Println("Relay Message Length: ", len(p.Relay.Messages))
+		// update the relay to be empty messages, as we serve the peer, it may get populated with more messages to relay.
+		var emptyMessages []MessageWithAuth
+		p.Relay = Messages{
+			Messages: emptyMessages,
+		}
+		// routine to dial to other peers and to serve(receive/listen) to peers dialing in.
+		go p.dial(msgsToRelay) // send to peers
+		go p.serve()           // receive from peers
+
+		p.wg.Wait() // wait until dial and serve are finished.
+		fmt.Println("dial and serve are complete")
+		fmt.Println("Relay Message Length: ", len(p.Relay.Messages))
+		// update round numer
+		p.roundNum++
+		// iterate to another round.
+	}
 
 	return p
 }
@@ -411,6 +420,10 @@ func (p *Peer) startRoundTime() {
 	for i := 0; i < 5; i++ {
 		fmt.Println("Time: ", i)
 		time.Sleep(1 * time.Second)
+		if p.hasReceivedFromAllPeers() {
+			p.Stop()
+			return
+		}
 	}
 
 	p.Stop()
@@ -485,6 +498,9 @@ func isValidMessage(p *Peer, message MessageWithAuth) bool {
 		return false
 	}
 
+	// store # of distinct messages
+	var distinctSignatures []int
+
 	for i := 0; i < len(message.Signatures); i++ {
 		// Verify
 		// might need to create a variable that contains all the public keys for all the peers
@@ -496,12 +512,28 @@ func isValidMessage(p *Peer, message MessageWithAuth) bool {
 		verifystatus := dsa.Verify(&publicKey, signhash, signature.R, signature.S)
 		// fmt.Printf("should be true here \n")
 		// fmt.Println(verifystatus) // should be true
+
+		// add to distinct Signatures
+		foundSig := false
+		for j := 0; j < len(distinctSignatures); j++ {
+			if message.Signatures[i].PeerNum == distinctSignatures[j] {
+				foundSig = true
+			}
+		}
+		// if we don't find the signature, its a unique signature so we should add it to the distint sigs array
+		if !foundSig {
+			distinctSignatures = append(distinctSignatures, message.Signatures[i].PeerNum)
+		}
+
 		if verifystatus == false {
 			return false
 		}
 	}
 
-	return true
+	if len(distinctSignatures) == p.roundNum {
+		return true
+	}
+	return false
 }
 
 func isMessageInExtracted(p *Peer, message MessageWithAuth) bool {
@@ -563,10 +595,10 @@ func (p *Peer) handleConnection(conn net.Conn) {
 
 	// add to relay messages for next round
 	p.Relay.Messages = append(p.Relay.Messages, newRelayMessages...)
-	if p.hasReceivedFromAllPeers() {
-		fmt.Println("Received from all peers...")
-		// p.Stop()
-	}
+	// if p.hasReceivedFromAllPeers() {
+	// 	fmt.Println("Received from all peers...")
+	// 	// p.Stop()
+	// }
 }
 
 // Usage:
