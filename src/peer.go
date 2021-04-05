@@ -207,6 +207,7 @@ func NewPeer(i int, n int) *Peer {
 	go p.serve() // receive from peers
 
 	p.wg.Wait() // wait until dial and serve are finished.
+	fmt.Println("dial and serve are complete")
 	return p
 }
 
@@ -418,8 +419,8 @@ func (p *Peer) time() {
 		currTime++
 		if currTime == 10 {
 			// check length of relayable messages here?
-			fmt.Println("curr time is equal to 10")
-			fmt.Println("Consensus Value: ", p.min)
+			// fmt.Println("curr time is equal to 10")
+			// fmt.Println("Consensus Value: ", p.min)
 			// if no messages to relay, and we are at timeout - this means there is nothing left to get and we can stop
 			if len(p.Relay.Messages) == 0 {
 				p.Stop()
@@ -430,7 +431,7 @@ func (p *Peer) time() {
 			// set peers received back to false
 			p.resetPeersReceived()
 
-			p.wg.Add(2)
+			p.wg.Add(1)
 
 			go func() {
 				p.dial()

@@ -6,7 +6,7 @@
 
 2. cd into generate_keys and build program
 ```
-cd generate_keys
+cd src/generate_keys
 go build generate_keys.go
 ```
 
@@ -17,7 +17,7 @@ go build generate_keys.go
 
 4. cd into afma, and build program
 ```
-cd ..
+cd ../..
 go build peer.go
 ```
 
