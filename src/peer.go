@@ -202,12 +202,19 @@ func NewPeer(i int, n int) *Peer {
 
 	p.wg.Add(2)
 
+	msgsToRelay := p.Relay
+	var emptyMessages []MessageWithAuth
+	p.Relay = Messages{
+		Messages: emptyMessages,
+	}
 	// routine to dial to other peers and to serve(receive/listen) to peers dialing in.
-	go p.dial()  // send to peers
-	go p.serve() // receive from peers
+	go p.dial(msgsToRelay) // send to peers
+	go p.serve()           // receive from peers
 
 	p.wg.Wait() // wait until dial and serve are finished.
 	fmt.Println("dial and serve are complete")
+	fmt.Println("Relay Message Length: ", len(p.Relay.Messages))
+
 	return p
 }
 
@@ -233,7 +240,7 @@ func getConn(offset int) net.Conn {
 		}
 		time.Sleep(1 * time.Second)
 		currTime++
-		if currTime == 4 {
+		if currTime == 10 {
 			// connection failed time out
 			return nil
 		}
@@ -241,7 +248,7 @@ func getConn(offset int) net.Conn {
 }
 
 // function to dial to other peers.
-func (p *Peer) dial() {
+func (p *Peer) dial(msgsToRelay Messages) {
 	fmt.Println("DIALING.....")
 	defer p.wg.Done()
 
@@ -272,7 +279,7 @@ func (p *Peer) dial() {
 		// msg = msg + rStr
 
 		encoder := gob.NewEncoder(dial)
-		encoder.Encode(p.Relay)
+		encoder.Encode(msgsToRelay)
 		// fmt.Println("messages to relay: ", p.Relay)
 
 		// var b bytes.Buffer
@@ -319,11 +326,11 @@ func (p *Peer) dial() {
 		// }
 	}
 
-	var emptyMessages []MessageWithAuth
-	p.Relay = Messages{
-		Messages: emptyMessages,
-	}
-	// fmt.Println("DONE WITH DIAL")
+	// var emptyMessages []MessageWithAuth
+	// p.Relay = Messages{
+	// 	Messages: emptyMessages,
+	// }
+	fmt.Println("DONE WITH DIAL")
 }
 
 // function to stop the peer server from running
@@ -340,15 +347,9 @@ func (p *Peer) serve() {
 
 	p.wg.Add(1)
 	go func() {
-		p.time()
+		p.startRoundTime()
 		p.wg.Done()
 	}()
-
-	// p.wg.Add(1)
-	// go func() {
-	// 	p.test()
-	// 	p.wg.Done()
-	// }()
 
 	for {
 		conn, err := p.listener.Accept()
@@ -366,10 +367,7 @@ func (p *Peer) serve() {
 				// start timer such that
 				p.wg.Done()
 			}()
-			// go func() {
-			// 	p.time()
-			// 	p.wg.Done()
-			// }()
+
 		}
 	}
 }
@@ -407,6 +405,18 @@ func (p *Peer) hasReceivedFromAllPeers() bool {
 	return false
 }
 
+// starts the round timer, if we reach the end of the time, we should go to next round because we are timed out
+// at this point
+func (p *Peer) startRoundTime() {
+	for i := 0; i < 5; i++ {
+		fmt.Println("Time: ", i)
+		time.Sleep(1 * time.Second)
+	}
+
+	p.Stop()
+	return
+}
+
 func (p *Peer) time() {
 	fmt.Println("STARTING TIME")
 	currTime := 0
@@ -434,7 +444,7 @@ func (p *Peer) time() {
 			p.wg.Add(1)
 
 			go func() {
-				p.dial()
+				p.dial(p.Relay)
 				p.wg.Done()
 			}()
 			go func() {
@@ -455,7 +465,7 @@ func (p *Peer) time() {
 			p.wg.Add(2)
 
 			go func() {
-				p.dial()
+				p.dial(p.Relay)
 				p.wg.Done()
 			}()
 			go func() {
@@ -553,6 +563,10 @@ func (p *Peer) handleConnection(conn net.Conn) {
 
 	// add to relay messages for next round
 	p.Relay.Messages = append(p.Relay.Messages, newRelayMessages...)
+	if p.hasReceivedFromAllPeers() {
+		fmt.Println("Received from all peers...")
+		// p.Stop()
+	}
 }
 
 // Usage:
