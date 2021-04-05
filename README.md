@@ -23,5 +23,5 @@ go build peer.go
 
 5. Using multiple terminal instances, start running the peers
 ```
-./peer.go -i=<peer index #> -n<total # of peers>
+go run peer.go -i=<peer index #> -n<total # of peers>
 ```
