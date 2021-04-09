@@ -9,7 +9,6 @@ import (
 	"encoding/gob"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"math/big"
 	"math/rand"
@@ -75,23 +74,10 @@ func check(err error) {
 
 /* ============= HASH AND SIGNATURE RELATED METHODS ============= */
 
-// get the H(m), or otherwise the hash of the message
-// returns an array of bytes
-func getSignHash(m float64) []byte {
-	h := sha1.New()
-	_, err := io.WriteString(h, fmt.Sprintf("%f", m))
-	check(err)
-	signhash := h.Sum(nil)
-
-	return signhash
-}
-
 func getBlockHashValue(block Block) []byte {
 	blockBytes := []byte(fmt.Sprintf("%v", block))
 	h := sha1.New()
-	//_, err := io.WriteString(h, fmt.Sprintf("%d", block))
 	h.Write(blockBytes)
-	//check(err)
 	return h.Sum(nil)
 }
 
@@ -120,20 +106,16 @@ type Peer struct {
 	quit            chan interface{} // to hold if we are ready to stop the server
 	wg              sync.WaitGroup   // used to wait for all routines to finish
 	v               float64          // value of peer to propose
-	Messages        Messages         // messages with authentication
-	Extracted       Messages         // messages that have been extracted
-	Relay           Messages         // messages to relay
-	ExtractedBlocks Blocks
-	RelayBlocks     Blocks
-	i               int            // peer number
-	n               int            // total number of peers
-	min             float64        // minimum value that the peer has received
-	numValsReceived int            // total number of values currently received by the peer
-	PrivateKey      dsa.PrivateKey // private key of the peer itself
-	peersReceived   []bool         // an array holding all the peers its received for this round
-	roundNum        int            // current round number
-	timeRun         int            // current time in seconds
-	consensusBlock  Block          // store consensus block after AFMA protocol
+	ExtractedBlocks Blocks           // list of extracted blocks
+	RelayBlocks     Blocks           // list of blocks to relay to other peers
+	i               int              // peer number
+	n               int              // total number of peers
+	numValsReceived int              // total number of values currently received by the peer
+	PrivateKey      dsa.PrivateKey   // private key of the peer itself
+	peersReceived   []bool           // an array holding all the peers its received for this round
+	roundNum        int              // current round number
+	timeRun         int              // current time in seconds
+	consensusBlock  Block            // store consensus block after AFMA protocol
 }
 
 type Block struct {
@@ -152,15 +134,6 @@ type BlockWithAuth struct {
 	Signatures []Signature
 }
 
-type Messages struct {
-	Messages []MessageWithAuth
-}
-
-type MessageWithAuth struct {
-	V          float64     // value of the peer
-	Signatures []Signature // list of signatures
-}
-
 type Signature struct {
 	Signature []byte
 	R         *big.Int
@@ -172,12 +145,10 @@ type Signature struct {
 // i: the peer number
 // n: the total number of peers
 func NewPeer(i int, n int) *Peer {
-	val := rand.Float64() // get a random value from 0 to 1
-	// t := []byte(fmt.Sprintf("%d", i))
 
+	// create data
 	sha_512 := sha512.New()
 	sha_512.Write([]byte(strconv.Itoa(i)))
-	// sha_512_256 := sha512.Sum512_256([]byte(i))
 
 	// create first block 0
 	block0 := &Block{
@@ -187,27 +158,10 @@ func NewPeer(i int, n int) *Peer {
 		Data:       []byte(strconv.Itoa(i)),
 	}
 
-	// fmt.Println("creating first block: got data- ", )
-
 	// get public and private key for this peer
 	privateKey := getPrivateKeyFromFile(i)
 
-	// hash value that the peer is trying to send
-	signhash := getSignHash(val)
-	// get signature
-	signature := signMessage(i, privateKey, signhash)
-
-	// Verify
-	var signatures []Signature
-	signatures = append(signatures, signature)
-	// create initial array with peer's own signed message
-	signedMessage := &MessageWithAuth{
-		V:          val,
-		Signatures: signatures,
-	}
-
-	// NEW NEW NEW
-	// create initialsigned block
+	// create initial signed block
 	blockSignHash := getBlockHashValue(*block0)
 	blockSig := signMessage(i, privateKey, blockSignHash)
 	var blockSigs []Signature
@@ -225,16 +179,6 @@ func NewPeer(i int, n int) *Peer {
 		Blocks: blockArray,
 	}
 
-	// fmt.Println("blocks test: ", blocks.Blocks[0].Block.data)
-
-	// create array of messages with auth
-	var messageArray []MessageWithAuth
-	messageArray = append(messageArray, *signedMessage)
-
-	messages := Messages{
-		Messages: messageArray,
-	}
-
 	// create bool array to determine which peers we have received from so far
 	peersReceived := make([]bool, n)
 	peersReceived[i] = true
@@ -242,21 +186,15 @@ func NewPeer(i int, n int) *Peer {
 	// create the new peer
 	p := &Peer{
 		quit:            make(chan interface{}),
-		v:               val,
-		Messages:        messages,
-		Extracted:       messages,
-		Relay:           messages,
 		ExtractedBlocks: blocks,
 		RelayBlocks:     blocks,
 		i:               i,
 		n:               n,
 		numValsReceived: 1,
-		min:             val,
 		PrivateKey:      privateKey,
 		roundNum:        1,
 		peersReceived:   peersReceived,
 	}
-	// fmt.Println("BLOCK 0: ", string(p.ExtractedBlocks.Blocks[0].Block.data))
 
 	// get the port address based on the peer number, i.
 	addr := getPort(i)
@@ -271,31 +209,9 @@ func NewPeer(i int, n int) *Peer {
 
 	p.wg.Add(2)
 
-	// // iterate through each round by dialing and sending until there are no messages to relay.
-	// for len(p.Relay.Messages) != 0 {
-	// 	fmt.Println("Starting round: ", p.roundNum)
-	// 	// save messages to relay and send that to dial to others
-	// 	msgsToRelay := p.Relay
-
-	// 	// update the relay to be empty messages, as we serve the peer, it may get populated with more messages to relay.
-	// 	var emptyMessages []MessageWithAuth
-	// 	p.Relay = Messages{
-	// 		Messages: emptyMessages,
-	// 	}
-	// 	// routine to dial to other peers and to serve(receive/listen) to peers dialing in.
-	// 	go p.dial(msgsToRelay) // send to peers
-	// 	go p.serve()           // receive from peers
-
-	// 	p.wg.Wait() // wait until dial and serve are finished.
-
-	// 	// update round number
-	// 	p.roundNum++
-	// }
-
 	for len(p.RelayBlocks.Blocks) != 0 {
 		fmt.Println("Starting round #", p.roundNum, " of consensus algorithm")
 		blocksToRelay := p.RelayBlocks
-		// fmt.Println("blocks to relay before: ", blocksToRelay.Blocks[0].Block.data)
 
 		var emptyBlocks []BlockWithAuth
 		p.RelayBlocks = Blocks{
@@ -329,8 +245,6 @@ func (p *Peer) setConsensusBlock() {
 	var rootHashList []RootHash
 	rootHashList = append(rootHashList, RootHash{B: minRootHash})
 
-	// var newData []byte
-
 	for i := 1; i < len(blocks); i++ {
 		// if current parent hash is less than current min, update the min values.
 		if bytes.Compare(blocks[i].Block.RootHash, minRootHash) == -1 {
@@ -338,7 +252,6 @@ func (p *Peer) setConsensusBlock() {
 			minIndex = i
 		}
 
-		// newData = append(newData, blocks[i].Block.Data...)
 		rootHashList = append(rootHashList, RootHash{B: blocks[i].Block.RootHash})
 	}
 
@@ -360,16 +273,12 @@ func (p *Peer) setConsensusBlock() {
 	sha_512.Write(newData)
 	newRootHash := sha_512.Sum(nil)
 
-	// fmt.Println("MIN BLOCK: ", string(blocks[minIndex].Block.Data))
-	// fmt.Println("TEST", blocks[minIndex].Block.Height+1)
 	newBlock := Block{
 		Height:     blocks[minIndex].Block.Height + 1,
 		ParentHash: blocks[minIndex].Block.RootHash,
 		RootHash:   newRootHash,
 		Data:       newData,
 	}
-
-	// fmt.Println("Consensus DATA: ", newBlock.Data)
 
 	p.consensusBlock = newBlock
 }
@@ -425,8 +334,6 @@ func (p *Peer) dial(blocksToRelay Blocks) {
 		}
 		defer dial.Close()
 
-		// fmt.Println("IN DIAL:", string(blocksToRelay.Blocks[0].Block.data))
-
 		encoder := gob.NewEncoder(dial)
 		encoder.Encode(blocksToRelay)
 	}
@@ -441,7 +348,6 @@ func (p *Peer) Stop() {
 // Serve function so that peer can receive and accept connections from other peers
 func (p *Peer) serve() {
 	fmt.Printf("Peer %d of %d Started...\n", p.i, p.n-1)
-	// fmt.Printf("Value For Peer %d to Send: %f\n", p.i, p.v)
 	defer p.wg.Done()
 
 	p.wg.Add(1)
@@ -463,7 +369,6 @@ func (p *Peer) serve() {
 			p.wg.Add(1)
 			go func() {
 				p.handleConnection(conn) // handle the connection from a peer attempting to send a value
-				// start timer such that
 				p.wg.Done()
 			}()
 
@@ -507,46 +412,6 @@ func (p *Peer) startRoundTime() {
 	return
 }
 
-func (p *Peer) isValidMessage(message MessageWithAuth) bool {
-	if len(message.Signatures) != p.roundNum {
-		return false
-	}
-
-	// store # of distinct messages
-	var distinctSignatures []int
-
-	for i := 0; i < len(message.Signatures); i++ {
-		// Verify
-		publicKey := publicKeys[message.Signatures[i].PeerNum]
-		signhash := getSignHash(message.V)
-		// get signature
-		signature := message.Signatures[i]
-		verifystatus := dsa.Verify(&publicKey, signhash, signature.R, signature.S)
-
-		// add to distinct Signatures
-		foundSig := false
-		for j := 0; j < len(distinctSignatures); j++ {
-			if message.Signatures[i].PeerNum == distinctSignatures[j] {
-				foundSig = true
-			}
-		}
-		// if we don't find the signature, its a unique signature so we should add it to the distint sigs array
-		if !foundSig {
-			distinctSignatures = append(distinctSignatures, message.Signatures[i].PeerNum)
-		}
-
-		// if there is any false signatures, the msg isn't valid.
-		if verifystatus == false {
-			return false
-		}
-	}
-
-	if len(distinctSignatures) == p.roundNum {
-		return true
-	}
-	return false
-}
-
 // make sure auth has correct # of signatures
 func (p *Peer) isValidBlock(block BlockWithAuth) bool {
 	if len(block.Signatures) != p.roundNum {
@@ -586,17 +451,6 @@ func (p *Peer) isValidBlock(block BlockWithAuth) bool {
 	return false
 }
 
-// check if the message value is already in the extracted array of the peer.
-func (p *Peer) isMessageInExtracted(message MessageWithAuth) bool {
-	for i := 0; i < len(p.Extracted.Messages); i++ {
-		if message.V == p.Extracted.Messages[i].V {
-			return true
-		}
-	}
-
-	return false
-}
-
 // check if the block is already in the extracted array of the peer.
 func (p *Peer) isBlockInExtracted(block BlockWithAuth) bool {
 	for i := 0; i < len(p.ExtractedBlocks.Blocks); i++ {
@@ -609,41 +463,25 @@ func (p *Peer) isBlockInExtracted(block BlockWithAuth) bool {
 
 // handle the connection from the peer
 func (p *Peer) handleConnection(conn net.Conn) {
-	// receive round k messages from peer
 
-	// get all messages that have been relayed by peer
-	// dec := gob.NewDecoder(conn)
-	// messages := &Messages{}
-	// dec.Decode(messages)
+	// get all blocks that have been relayed by peer
 	dec := gob.NewDecoder(conn)
 	blocks := &Blocks{}
 	dec.Decode(blocks)
 
 	conn.Close()
 
-	// new messages to relay
-	// var newRelayMessages []MessageWithAuth
 	var newRelayBlocks []BlockWithAuth
-	// fmt.Println("BEFORE FOR LOOP", blocks.Blocks[0].Block.RootHash)
-
-	//blocks from relay by peer
-	// for
 
 	// for all relayed messages, check
 	for i := 0; i < len(blocks.Blocks); i++ {
-		// fmt.Println("BLOCK BEING RELAYED: data-", blocks.Blocks[i].Block.Data)
-		// check if message is valid
+		// check if block is valid
 		if p.isValidBlock(blocks.Blocks[i]) {
-			// fmt.Println("it should be valid")
-			// check is message is isn't in extracted
+			// check if block s in extracted
 			if !p.isBlockInExtracted(blocks.Blocks[i]) {
-				// fmt.Println("shouldn't be in extracted")
 				// sign the message
 				signature := signMessage(p.i, p.PrivateKey, getBlockHashValue(blocks.Blocks[i].Block))
-				// msgWithAppendedSig := MessageWithAuth{
-				// 	V:          messages.Messages[i].V,
-				// 	Signatures: append(messages.Messages[i].Signatures, signature),
-				// }
+
 				blockWithAppendedSig := BlockWithAuth{
 					Block:      blocks.Blocks[i].Block,
 					Signatures: append(blocks.Blocks[i].Signatures, signature),
@@ -658,11 +496,6 @@ func (p *Peer) handleConnection(conn net.Conn) {
 				newRelayBlocks = append(newRelayBlocks, blockWithAppendedSig)
 
 			}
-
-			// update min value
-			// if blocks.Blocks[i].Block.RootHash < p.min {
-			// 	p.min = messages.Messages[i].V
-			// }
 
 			// update peer received
 			p.peersReceived[blocks.Blocks[i].Signatures[0].PeerNum] = true
@@ -688,11 +521,6 @@ func main() {
 	}
 
 	p := NewPeer(*i, *n)
-	// fmt.Printf("Consensus Minimum Value: %f\n", p.min)
-	// fmt.Println("Extracted: ", p.ExtractedBlocks.Blocks[0].Block.Data)
-	// fmt.Println("String: ", string(p.ExtractedBlocks.Blocks[0].Block.Data))
-	// fmt.Println("Consensus block: ", string(p.consensusBlock.Data))
-	fmt.Println("Consensus block: ", p.consensusBlock.Data)
 
 	fmt.Println("Consensus Block: ", p.consensusBlock)
 }
